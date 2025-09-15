@@ -489,10 +489,51 @@ When inserting large amounts of data into ClickHouse, use chunked inserts to pre
 
 **Example:**
 ```python
-CHUNK_SIZE = 10000
-for i in range(0, len(converted_records), CHUNK_SIZE):
-    chunk = converted_records[i:i+CHUNK_SIZE]
-    clickhouse_api.insert(table, chunk, table_structure=clickhouse_struct)
+
+CHUNK_SIZE = 10000  # You can adjust this based on your performance and server limits
+
+for table in tables:
+    # Get MySQL table structure
+    mysql_create_stmt = mysql_api.get_table_create_statement(table)
+    mysql_struct = converter.parse_mysql_table_structure(mysql_create_stmt, required_table_name=table)
+    clickhouse_struct = converter.convert_table_structure(mysql_struct)
+
+    # Drop table in ClickHouse using clickhouse-connect
+    ch_client = clickhouse_connect.get_client(
+        host=clickhouse_conf['host'],
+        port=clickhouse_conf['port'],
+        username=clickhouse_conf['user'],
+        password=clickhouse_conf['password'],
+        database=clickhouse_conf['database']
+    )
+    ch_client.command(f"DROP TABLE IF EXISTS {table}")
+    ch_client.close()
+
+    # Create table in ClickHouse
+    clickhouse_api.create_table(clickhouse_struct)
+
+    # Chunked extraction and loading from MySQL to ClickHouse
+    start_value = None
+    total_inserted = 0
+    while True:
+        records = mysql_api.get_records(
+            table_name=table,
+            order_by=clickhouse_struct.primary_keys,
+            limit=CHUNK_SIZE,
+            start_value=start_value
+        )
+        if not records:
+            break
+        converted_records = converter.convert_records(records, mysql_struct, clickhouse_struct)
+        clickhouse_api.insert(table, converted_records, table_structure=clickhouse_struct)
+        print(f"Inserted records {total_inserted} to {total_inserted + len(records)} for table '{table}'.")
+        total_inserted += len(records)
+        # Update start_value for next chunk (pagination)
+        if records:
+            start_value = [records[-1][i] for i in clickhouse_struct.primary_key_ids]
+
+    print(f"Table '{table}' structure replicated and data dumped from MySQL to ClickHouse.")
+
 ```
 
 This approach splits the data into manageable batches, making the migration more reliable and efficient.
