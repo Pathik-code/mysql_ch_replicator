@@ -1,6 +1,6 @@
 # ClickHouse MySQL Dump Migration: Final Changes & Setup
 
-## Final Changes Made
+## Changes made for using the mysql_ch_replicator for non primary key tables as bulk data dump.
 
 ### 1. Primary Key Handling in Converter
 - In `converter.py`, logic was added to check if a table has no primary key.
@@ -28,16 +28,9 @@
         query = f'SELECT * FROM `{table_name}` {where}ORDER BY {order_by_str}'
     ```
 
-### 4. ClickHouse Table Drop Logic
+### 4. ClickHouse Table Drop Logic(Optional)
 - Switched to using `clickhouse-connect` for dropping tables before recreating them, ensuring a clean migration.
 
----
-
-## How You Set Up to Dump Non-Primary Key Tables
-
-- **Bulk Data Dump:**
-  - Data is fetched from MySQL and inserted into ClickHouse using the mapped structure.
-  - If there are duplicate `UserID` values and you use `ReplacingMergeTree`, only the latest row per `UserID` will be kept.
 
 ---
 
@@ -142,3 +135,20 @@ for table in tables:
 - The right engine and settings are used for efficient storage and fast inserts.
 - Code changes allow smooth dumping of non-primary key tables from MySQL to ClickHouse.
 - Direct modification of library files enables easier future script adjustments.
+
+
+
+
+## Chunked Insertion to Avoid Timeout & Memory Issues
+
+When inserting large amounts of data into ClickHouse, use chunked inserts to prevent socket timeouts and memory errors.
+
+**Example:**
+```python
+CHUNK_SIZE = 10000
+for i in range(0, len(converted_records), CHUNK_SIZE):
+    chunk = converted_records[i:i+CHUNK_SIZE]
+    clickhouse_api.insert(table, chunk, table_structure=clickhouse_struct)
+```
+
+This approach splits the data into manageable batches, making the migration more reliable and efficient.
